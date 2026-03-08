@@ -5,9 +5,15 @@ import torch
 from typing import Optional
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from abc import ABC, abstractmethod
-from chess_exam.chess_tournament import Player
 
 
+class Player(ABC):
+    def __init__(self, name: str):
+        self.name = name
+
+    @abstractmethod
+    def get_move(self, fen: str) -> Optional[str]:
+        pass
 
 
 class TransformerPlayer(Player):
