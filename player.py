@@ -5,6 +5,7 @@ import torch
 from typing import Optional
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from abc import ABC, abstractmethod
+from chess_exam.chess_tournament import Player
 
 
 
