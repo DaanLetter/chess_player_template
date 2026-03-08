@@ -4,8 +4,9 @@ import re
 import torch
 from typing import Optional
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from abc import ABC, abstractmethod
 
-from chess_tournament.players import Player
+
 
 
 class TransformerPlayer(Player):
@@ -20,8 +21,8 @@ class TransformerPlayer(Player):
 
     def __init__(
         self,
-        name: str = "TinyLMPlayer",
-        model_id: str = "HuggingFaceTB/SmolLM2-135M-Instruct",
+        name: str = "PabloSnackbarChessBot",
+        model_id: str = "PabloSnackbar/chess-transformer4.0",
         temperature: float = 0.7,
         max_new_tokens: int = 8,
     ):
@@ -56,7 +57,7 @@ class TransformerPlayer(Player):
     # Prompt
     # -------------------------
     def _build_prompt(self, fen: str) -> str:
-        return f"FEN: {fen}\nMove:"
+        return f"Position: {fen} Best move:"
 
     def _extract_move(self, text: str) -> Optional[str]:
         match = self.UCI_REGEX.search(text)
@@ -70,38 +71,81 @@ class TransformerPlayer(Player):
     # -------------------------
     # Main API
     # -------------------------
-    def get_move(self, fen: str) -> Optional[str]:
 
+    def get_move(self, fen: str) -> Optional[str]:
         try:
             self._load_model()
         except Exception:
             return self._random_legal(fen)
 
-        prompt = self._build_prompt(fen)
+        prompt = f"Position: {fen} Best move:"
+        board = chess.Board(fen)
 
-        try:
-            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+        #check for immediate checkmate
+        checkmate_move = self._find_checkmate(board)
+        if checkmate_move:
+            return checkmate_move
 
-            with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=self.max_new_tokens,
-                    do_sample=True,
-                    temperature=self.temperature,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                )
+        #try model up to 5 times
+        for attempt in range(5):
+            try:
+                inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
 
-            decoded = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+                with torch.no_grad():
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=self.max_new_tokens,
+                        do_sample=True if attempt > 0 else False,  # greedy first, then sample
+                        temperature=0.7 if attempt > 0 else self.temperature,
+                        pad_token_id=self.tokenizer.pad_token_id,
+                    )
 
-            if decoded.startswith(prompt):
-                decoded = decoded[len(prompt):]
+                decoded = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+                generated = decoded[len(prompt):].strip()
 
-            move = self._extract_move(decoded)
+                if len(generated) >= 5 and generated[4] in 'qrbn' and generated[3] in '18':
+                    predicted = generated[:5]
+                elif len(generated) >= 4:
+                    predicted = generated[:4]
+                else:
+                    continue
 
-            if move:
-                return move
+                if chess.Move.from_uci(predicted) in board.legal_moves and self._avoids_immediate_checkmate(board, predicted):
+                    return predicted
 
-        except Exception:
-            pass
+            except Exception:
+                continue
+        # fallback - at least avoid checkmate if possible
+        safe_moves = [m.uci() for m in board.legal_moves
+                    if self._avoids_immediate_checkmate(board, m.uci())]
+        if safe_moves:
+            return random.choice(safe_moves)
 
         return self._random_legal(fen)
+
+    #extra bits and pieces
+
+    def _find_checkmate(self, board: chess.Board) -> Optional[str]:
+        """if there's a checkmate move available, take it immediately"""
+        for move in board.legal_moves:
+            board.push(move)
+            if board.is_checkmate():
+                board.pop()
+                return move.uci()
+            board.pop()
+        return None
+
+    def _avoids_immediate_checkmate(self, board: chess.Board, move_uci: str) -> bool:
+        """check if this move leaves opponent with immediate checkmate"""
+        move = chess.Move.from_uci(move_uci)
+        board.push(move)
+        for opponent_move in board.legal_moves:
+            board.push(opponent_move)
+            if board.is_checkmate():
+                board.pop()
+                board.pop()
+                return False  # this move is bad, opponent can checkmate
+            board.pop()
+        board.pop()
+        return True  # move is safe
+
