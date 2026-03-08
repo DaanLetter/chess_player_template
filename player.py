@@ -21,9 +21,9 @@ class TransformerPlayer(Player):
 
     def __init__(
         self,
-        name: str = "PabloSnackbarChessBot",
+        name: str = "PabloSnackbarChessBot (student ID: 2912864)",
         model_id: str = "PabloSnackbar/chess-transformer4.0",
-        temperature: float = 0.7,
+        temperature: float = 1,
         max_new_tokens: int = 8,
     ):
         super().__init__(name)
